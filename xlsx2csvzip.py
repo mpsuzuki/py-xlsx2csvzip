@@ -9,35 +9,39 @@ import sys
 from pathlib import Path
 import zipfile
 
-import win32com.client
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
 
-# Windows API definitions for safely extracting raw EMF bytes from clipboard
-import ctypes
-from ctypes import wintypes
+# Check if the operating system is Windows
+IS_WINDOWS = sys.platform.startswith("win32")
 
-OpenClipboard = ctypes.windll.user32.OpenClipboard
-CloseClipboard = ctypes.windll.user32.CloseClipboard
-GetClipboardData = ctypes.windll.user32.GetClipboardData
-EmptyClipboard = ctypes.windll.user32.EmptyClipboard
+# Dynamically import Windows-specific libraries only when running on Windows
+if IS_WINDOWS:
+  import win32com.client
+  import ctypes
+  from ctypes import wintypes
 
-# Windows internal constants
-CF_ENHMETAFILE = 14
-GDI_ERROR = 0xFFFFFFFF
+  OpenClipboard = ctypes.windll.user32.OpenClipboard
+  CloseClipboard = ctypes.windll.user32.CloseClipboard
+  GetClipboardData = ctypes.windll.user32.GetClipboardData
+  EmptyClipboard = ctypes.windll.user32.EmptyClipboard
 
-# GDI32 API definitions for checking size and duplicating EMF data
-GetEnhMetaFileBits = ctypes.windll.gdi32.GetEnhMetaFileBits
-GetEnhMetaFileBits.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_void_p]
-GetEnhMetaFileBits.restype = wintypes.UINT
+  CF_ENHMETAFILE = 14
+  GDI_ERROR = 0xFFFFFFFF
 
-DeleteEnhMetaFile = ctypes.windll.gdi32.DeleteEnhMetaFile
-DeleteEnhMetaFile.argtypes = [wintypes.HANDLE]
-DeleteEnhMetaFile.restype = wintypes.BOOL
+  GetEnhMetaFileBits = ctypes.windll.gdi32.GetEnhMetaFileBits
+  GetEnhMetaFileBits.argtypes = [wintypes.HANDLE, wintypes.UINT, ctypes.c_void_p]
+  GetEnhMetaFileBits.restype = wintypes.UINT
+
+  DeleteEnhMetaFile = ctypes.windll.gdi32.DeleteEnhMetaFile
+  DeleteEnhMetaFile.argtypes = [wintypes.HANDLE]
+  DeleteEnhMetaFile.restype = wintypes.BOOL
 
 
 def get_emf_bytes_from_clipboard():
   """Extracts raw EMF bytes from the Windows clipboard safely."""
+  if not IS_WINDOWS:
+    return None
   if not OpenClipboard(None):
     return None
   try:
@@ -184,6 +188,9 @@ def open_output_stream(args, zfile, basename, suffix):
 
 def export_charts(args, zfile, com_ws):
   """Finds all charts and exports them. PNG is default. EMF is optional via --emf."""
+  if not IS_WINDOWS:
+    return
+
   chart_objects = com_ws.ChartObjects()
   if chart_objects.Count == 0:
     return
@@ -289,7 +296,7 @@ def process_single_xlsx(args, xlsx_path_str):
     zfile = zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED)
 
   try:
-    # openpyxl side
+    # openpyxl side (Runs on any OS)
     wb = load_workbook(str(xlsx_path), data_only=False)
 
     for ws in wb.worksheets:
@@ -308,8 +315,13 @@ def process_single_xlsx(args, xlsx_path_str):
     # Determine whether to proceed to Excel COM side
     proceed_to_eval = (not args.cached) or (args.cached and args.eval)
 
+    # Only attempt Excel COM execution if we are on Windows
     if proceed_to_eval:
-      # Excel COM side
+      if not IS_WINDOWS:
+        print("  Skipping Excel COM processing (Not running on Windows)", file=sys.stderr)
+        return
+
+      # Excel COM side (Windows only)
       print("  dispatch Excel", file=sys.stderr)
       excel = win32com.client.DispatchEx("Excel.Application")
       try:
