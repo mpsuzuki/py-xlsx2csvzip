@@ -1,3 +1,5 @@
+setpath-python.ps1
+*.swp
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
