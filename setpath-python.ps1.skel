@@ -1,0 +1,7 @@
+# $env:PYHOME="$env:USERPROFILE\AppData\Local\Programs\Python\PythonXXX-YYY"
+$env:PATH="$env:PYHOME;$env:PYHOME\Scripts;$env:PATH"
+
+function pyinfo {
+    Get-Command python
+    python --version
+}
