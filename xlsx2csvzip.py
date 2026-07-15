@@ -134,7 +134,8 @@ def parse_args():
   parser = argparse.ArgumentParser(
     description="Export XLSX workbook contents into a ZIP file or directory"
   )
-  parser.add_argument("xlsx", nargs="+", help="input xlsx file(s)")
+  parser.add_argument("xlsx", nargs="*", help="input xlsx file(s)")
+  parser.add_argument("--files-from", help="read pathnames of XLSX from file")
   parser.add_argument(
     "--cwd",
     action="store_true",
@@ -458,9 +459,23 @@ def process_single_xlsx(args, xlsx_path_str):
 def main():
   args = parse_args()
 
-  # Iterate over all provided XLSX targets
-  for xlsx_target in args.xlsx:
-    process_single_xlsx(args, xlsx_target)
+  if args.files_from:
+    ctx = (
+      nullcontext(sys.stdin)
+      if args.files_from == "-"
+      else open(args.files_from, "r")
+    )
+    with ctx as fh:
+      for xlsx_target in fh:
+        xlsx_target = xlsx_target.rstrip("\r\n")
+        print(f"open file {xlsx_target} specified by file list", file=sys.stderr)
+        process_single_xlsx(args, xlsx_target)
+  else:
+    print(args.xlsx)
+    # Iterate over all provided XLSX targets
+    for xlsx_target in args.xlsx:
+      print(f"open file {xlsx_target} specified by argument", file=sys.stderr)
+      process_single_xlsx(args, xlsx_target)
 
 
 if __name__ == "__main__":
