@@ -463,7 +463,7 @@ def main():
     ctx = (
       nullcontext(sys.stdin)
       if args.files_from == "-"
-      else open(args.files_from, "r")
+      else open(args.files_from, "r", encoding="utf-8")
     )
     with ctx as fh:
       for xlsx_target in fh:
