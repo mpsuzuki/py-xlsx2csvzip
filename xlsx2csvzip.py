@@ -5,8 +5,11 @@ from contextlib import nullcontext, contextmanager
 import csv
 import io
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+import tempfile
 import zipfile
 
 from openpyxl import load_workbook
@@ -14,6 +17,7 @@ from openpyxl.styles.numbers import is_date_format
 
 # Check if the operating system is Windows
 IS_WINDOWS = sys.platform.startswith("win32")
+IS_MAC = sys.platform.startswith("darwin")
 
 # Dynamically import Windows-specific libraries only when running on Windows
 if IS_WINDOWS:
@@ -36,6 +40,23 @@ if IS_WINDOWS:
   DeleteEnhMetaFile = ctypes.windll.gdi32.DeleteEnhMetaFile
   DeleteEnhMetaFile.argtypes = [wintypes.HANDLE]
   DeleteEnhMetaFile.restype = wintypes.BOOL
+
+
+def get_libreoffice_command():
+  """Returns the platform-specific command to execute LibreOffice."""
+  if IS_WINDOWS:
+    standard_path = Path("C:/Program Files/LibreOffice/program/soffice.exe")
+    if standard_path.exists():
+      return str(standard_path)
+    return "soffice"
+  elif IS_MAC:
+    mac_path = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
+    if mac_path.exists():
+      return str(mac_path)
+    return "soffice"
+  else:
+    # Linux / WSL default
+    return "soffice"
 
 
 def get_emf_bytes_from_clipboard():
@@ -134,7 +155,17 @@ def parse_args():
   parser.add_argument(
     "--eval",
     action="store_true",
-    help="also evaluate formulas with Excel and write value.csv",
+    help="evaluate formulas with Excel (Windows only) and write value.csv",
+  )
+  parser.add_argument(
+    "--libre",
+    action="store_true",
+    help="evaluate formulas with LibreOffice and write value_libre.csv",
+  )
+  parser.add_argument(
+    "--force-value-name",
+    action="store_true",
+    help="force LibreOffice output to be named 'value.csv' instead of 'value_libre.csv'",
   )
   parser.add_argument(
     "--emf",
@@ -187,7 +218,7 @@ def open_output_stream(args, zfile, basename, suffix):
 
 
 def export_charts(args, zfile, com_ws):
-  """Finds all charts and exports them. PNG is default. EMF is optional via --emf."""
+  """Finds all charts and exports them via Excel. PNG is default. EMF is optional."""
   if not IS_WINDOWS:
     return
 
@@ -276,6 +307,76 @@ def export_charts(args, zfile, com_ws):
           temp_emf_path.unlink()
 
 
+def process_with_libreoffice(args, zfile, xlsx_path):
+  """Evaluates formulas via LibreOffice headless conversion, exports value.csv,
+
+  and extracts embedded charts via an HTML conversion hack.
+  """
+  print("  evaluating formulas and extracting charts via LibreOffice", file=sys.stderr)
+  libre_cmd = get_libreoffice_command()
+
+  # Enforce 'value.csv' if user specifies --force-value-name
+  csv_suffix = "value.csv" if args.force_value_name else "value_libre.csv"
+
+  with tempfile.TemporaryDirectory() as tmpdir:
+    tmpdir_path = Path(tmpdir)
+
+    # --- STEP 1: Formula Evaluation (Convert to XLSX) ---
+    cmd_xlsx = [
+      libre_cmd, "--headless",
+      "--convert-to", "xlsx",
+      "--outdir", str(tmpdir_path),
+      str(xlsx_path)
+    ]
+    try:
+      subprocess.run(cmd_xlsx, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+      print(f"  Error: Failed to execute LibreOffice XLSX conversion: {e}", file=sys.stderr)
+      return
+
+    calculated_xlsx = tmpdir_path / f"{xlsx_path.stem}.xlsx"
+    if not calculated_xlsx.exists():
+      print("  Error: LibreOffice output file was not found.", file=sys.stderr)
+      return
+
+    wb_libre = load_workbook(str(calculated_xlsx), data_only=True)
+    for ws in wb_libre.worksheets:
+      with open_output_stream(args, zfile, ws.title, csv_suffix) as o:
+        write_csv(iter_cell_rows(ws), o)
+
+    # --- STEP 2: Chart Extraction Hack (Convert to HTML) ---
+    # LibreOffice outputs embedded shapes/charts as sequential 'img0.png', 'img1.png'...
+    cmd_html = [
+      libre_cmd, "--headless",
+      "--convert-to", "html",
+      "--outdir", str(tmpdir_path),
+      str(xlsx_path)
+    ]
+    try:
+      subprocess.run(cmd_html, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+      print(f"  Warning: Failed to execute LibreOffice HTML conversion for charts: {e}", file=sys.stderr)
+      return
+
+    # Scan and process all extracted chart images chronologically
+    extracted_images = sorted(tmpdir_path.glob("*.png"))
+
+    for i, img_path in enumerate(extracted_images, start=1):
+      chart_filename = f"libre_chart_{i}.png"
+
+      if zfile:
+        print(f"    {chart_filename}: adding to zip", file=sys.stderr)
+        zfile.write(str(img_path), chart_filename)
+      elif args.dir:
+        outdir = Path(args.dir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        dest_path = outdir / chart_filename
+        print(f"  create {dest_path}", file=sys.stderr)
+        shutil.copy2(img_path, dest_path)
+      else:
+        print(f"  [LibreOffice Chart Extracted]: {chart_filename}", file=sys.stderr)
+
+
 def process_single_xlsx(args, xlsx_path_str):
   xlsx_path = Path(xlsx_path_str).resolve()
   print(f"\nProcessing: {xlsx_path}", file=sys.stderr)
@@ -296,7 +397,7 @@ def process_single_xlsx(args, xlsx_path_str):
     zfile = zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED)
 
   try:
-    # openpyxl side (Runs on any OS)
+    # openpyxl static side (Runs on any OS)
     wb = load_workbook(str(xlsx_path), data_only=False)
 
     for ws in wb.worksheets:
@@ -312,36 +413,38 @@ def process_single_xlsx(args, xlsx_path_str):
         with open_output_stream(args, zfile, ws.title, "cached.csv") as o:
           write_csv(iter_cell_rows(ws), o)
 
-    # Determine whether to proceed to Excel COM side
-    proceed_to_eval = (not args.cached) or (args.cached and args.eval)
+    # 1. Process Excel COM side
+    run_excel = args.eval or (not args.cached and not args.libre and IS_WINDOWS)
 
-    # Only attempt Excel COM execution if we are on Windows
-    if proceed_to_eval:
+    if run_excel:
       if not IS_WINDOWS:
         print("  Skipping Excel COM processing (Not running on Windows)", file=sys.stderr)
-        return
+      else:
+        print("  dispatch Excel", file=sys.stderr)
+        excel = win32com.client.DispatchEx("Excel.Application")
+        try:
+          excel.Visible = False
+          excel.DisplayAlerts = False
 
-      # Excel COM side (Windows only)
-      print("  dispatch Excel", file=sys.stderr)
-      excel = win32com.client.DispatchEx("Excel.Application")
-      try:
-        excel.Visible = False
-        excel.DisplayAlerts = False
+          com_wb = excel.Workbooks.Open(str(xlsx_path))
+          excel.CalculateFullRebuild()
 
-        com_wb = excel.Workbooks.Open(str(xlsx_path))
-        excel.CalculateFullRebuild()
+          for com_ws in com_wb.Worksheets:
+            with open_output_stream(args, zfile, com_ws.Name, "value.csv") as o:
+              write_csv(iter_value_rows(com_ws), o)
 
-        for com_ws in com_wb.Worksheets:
-          with open_output_stream(args, zfile, com_ws.Name, "value.csv") as o:
-            write_csv(iter_value_rows(com_ws), o)
+            export_charts(args, zfile, com_ws)
 
-          # Export charts from the current worksheet
-          export_charts(args, zfile, com_ws)
+          com_wb.Close(False)
+        finally:
+          print("  quit Excel", file=sys.stderr)
+          excel.Quit()
 
-        com_wb.Close(False)
-      finally:
-        print("  quit Excel", file=sys.stderr)
-        excel.Quit()
+    # 2. Process LibreOffice side
+    run_libre = args.libre or (not args.cached and not args.eval and not IS_WINDOWS)
+
+    if run_libre:
+      process_with_libreoffice(args, zfile, xlsx_path)
 
   finally:
     if zfile:
