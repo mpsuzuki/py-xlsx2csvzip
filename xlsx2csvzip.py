@@ -135,18 +135,23 @@ def parse_args():
     description="Export XLSX workbook contents into a ZIP file or directory"
   )
   parser.add_argument("xlsx", nargs="+", help="input xlsx file(s)")
-  parser.add_argument("--rawdir", help="output directory to emit all raw CSV (for debugging)")
+  parser.add_argument(
+    "--cwd",
+    action="store_true",
+    help="save auto-generated zip in the current directory instead of input directory",
+  )
   parser.add_argument("--dir", help="output directory to emit all ZIP files")
-  parser.add_argument("--zip", help="output zip file path (explicit)")
+  parser.add_argument("--rawdir", help="output directory to emit all raw CSV (for debugging)")
   parser.add_argument(
     "--xlsx2zip",
     action="store_true",
     help="auto-generate zip file named after the input xlsx",
   )
+  parser.add_argument("--zip", help="output zip file path (explicit)")
   parser.add_argument(
-    "--cwd",
+    "--emf",
     action="store_true",
-    help="save auto-generated zip in the current directory instead of input directory",
+    help="export charts as high-resolution EMF files (requires clipboard)",
   )
   parser.add_argument(
     "--cached",
@@ -167,11 +172,6 @@ def parse_args():
     "--force-value-name",
     action="store_true",
     help="force LibreOffice output to be named 'value.csv' instead of 'value_libre.csv'",
-  )
-  parser.add_argument(
-    "--emf",
-    action="store_true",
-    help="export charts as high-resolution EMF files (requires clipboard)",
   )
 
   return parser.parse_args()

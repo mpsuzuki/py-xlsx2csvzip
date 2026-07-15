@@ -3,6 +3,31 @@ Python script to convert XLSX file to CSVs in ZIP.
 
 ## Usage
 ```
+usage: xlsx2csvzip.py [-h]
+                      [--cwd] [--rawdir RAWDIR] [--dir DIR]
+                      [--xlsx2zip] [--zip ZIP]
+                      [--emf]
+                      [--cached] [--eval]
+                      [--libre] [--force-value-name]
+                      xlsx [xlsx ...]
+
+Export XLSX workbook contents into a ZIP file or directory
+
+positional arguments:
+  xlsx                input xlsx file(s)
+
+options:
+  -h, --help          show this help message and exit
+  --cwd               save auto-generated zip in the current directory instead of input directory
+  --dir DIR           output directory to emit all ZIP files
+  --rawdir RAWDIR     output directory to emit all raw CSV (for debugging)
+  --xlsx2zip          auto-generate zip file named after the input xlsx
+  --zip ZIP           output zip file path (explicit)
+  --emf               export charts as high-resolution EMF files (requires clipboard)
+  --cached            write cached.csv using values stored in workbook
+  --eval              evaluate formulas with Excel (Windows only) and write value.csv
+  --libre             evaluate formulas with LibreOffice and write value_libre.csv
+  --force-value-name  force LibreOffice output to be named 'value.csv' instead of 'value_libre.csv'
 usage: xlsx2csvzip.py [-h] [--dir DIR] [--zip ZIP] [--xlsx2zip] [--cwd]
                       [--cached] [--eval] [--emf]
                       xlsx [xlsx ...]
