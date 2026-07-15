@@ -135,7 +135,8 @@ def parse_args():
     description="Export XLSX workbook contents into a ZIP file or directory"
   )
   parser.add_argument("xlsx", nargs="+", help="input xlsx file(s)")
-  parser.add_argument("--dir", help="output directory (for debugging)")
+  parser.add_argument("--rawdir", help="output directory to emit all raw CSV (for debugging)")
+  parser.add_argument("--dir", help="output directory to emit all ZIP files")
   parser.add_argument("--zip", help="output zip file path (explicit)")
   parser.add_argument(
     "--xlsx2zip",
@@ -205,8 +206,8 @@ def open_output_stream(args, zfile, basename, suffix):
       yield stream
     finally:
       zfile.writestr(filename, stream.getvalue().encode("utf-8"))
-  elif args.dir:
-    outdir = Path(args.dir)
+  elif args.rawdir:
+    outdir = Path(args.rawdir)
     outdir.mkdir(parents=True, exist_ok=True)
     outfile = outdir / filename
     print(f"  create {outfile}", file=sys.stderr)
@@ -388,6 +389,8 @@ def process_single_xlsx(args, xlsx_path_str):
   elif args.xlsx2zip:
     if args.cwd:
       zip_path = Path.cwd() / f"{xlsx_path.stem}.zip"
+    elif args.dir:
+      zip_path = Path(args.dir) / f"{xlsx_path.stem}.zip"
     else:
       zip_path = xlsx_path.with_suffix(".zip")
 
