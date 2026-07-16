@@ -13,6 +13,8 @@ def parse_args():
   parser = argparse.ArgumentParser(
     description="Convert files to XLSX"
   )
+  parser.add_argument("--verbose", "-v", action="count", default=0,
+                      help="increase verbosity")
   parser.add_argument("--files-from", help="read src/dst from file")
   return parser.parse_args()
 
@@ -76,21 +78,17 @@ def find_libreoffice():
   return None
 
 
-def normalize_by_copy(src, dst):
-  print(
-    f"copy     {src} -> {dst}",
-      file=sys.stderr,
-  )
+def normalize_by_copy(src, dst, args):
+  if args.verbose > 2:
+    print(f"copy     {src} -> {dst}", file=sys.stderr)
   shutil.copy2(src, dst)
 
 
-def normalize_by_excel(src, dst):
+def normalize_by_excel(src, dst, args):
   import win32com.client
 
-  print(
-    f"excel    {src} -> {dst}",
-    file=sys.stderr,
-  )
+  if args.verbose > 1:
+    print(f"excel    {src} -> {dst}", file=sys.stderr)
 
   excel = win32com.client.DispatchEx(
     "Excel.Application"
@@ -115,18 +113,14 @@ def normalize_by_excel(src, dst):
     excel.Quit()
 
 
-def normalize_by_libreoffice(src, dst):
+def normalize_by_libreoffice(src, dst, args):
   soffice = find_libreoffice()
 
   if soffice is None:
-    raise RuntimeError(
-      "LibreOffice not found"
-    )
+    raise RuntimeError("LibreOffice not found")
 
-  print(
-    f"libre    {src} -> {dst}",
-    file=sys.stderr,
-  )
+  if args.verbose > 1:
+    print(f"libre    {src} -> {dst}", file=sys.stderr)
 
   outdir = Path(dst).parent
 
@@ -155,23 +149,20 @@ def normalize_by_libreoffice(src, dst):
     generated.replace(dst)
 
 
-def process_pair(src, dst, use_excel):
+def process_pair(src, dst, use_excel, args):
   src = Path(src).resolve()
   dst = Path(dst).resolve()
 
-  dst.parent.mkdir(
-    parents=True,
-    exist_ok=True,
-  )
+  dst.parent.mkdir(parents=True, exist_ok=True)
 
   if is_real_xlsx(src):
-    normalize_by_copy(src, dst)
+    normalize_by_copy(src, dst, args)
 
   elif use_excel:
-    normalize_by_excel(src, dst)
+    normalize_by_excel(src, dst, args)
 
   else:
-    normalize_by_libreoffice(src, dst)
+    normalize_by_libreoffice(src, dst, args)
 
 
 def main():
@@ -206,7 +197,7 @@ def main():
         src, dst = line.split("\t", 1)
 
         try:
-          process_pair(src, dst, use_excel)
+          process_pair(src, dst, use_excel, args)
 
         except Exception as e:
           failed = True
