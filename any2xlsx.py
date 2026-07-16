@@ -9,18 +9,6 @@ from pathlib import Path
 from contextlib import nullcontext
 
 
-def parse_args():
-  parser = argparse.ArgumentParser(
-    description="Convert files to XLSX"
-  )
-  parser.add_argument("--verbose", "-v", action="count", default=0,
-                      help="increase verbosity")
-  parser.add_argument("--files-from", help="read src/dst from file")
-  parser.add_argument("--interactive", action="store_true",
-                      help="display Excel window")
-  return parser.parse_args()
-
-
 IS_WINDOWS = sys.platform.startswith("win32")
 
 
@@ -80,6 +68,26 @@ def find_libreoffice():
   return None
 
 
+def parse_args():
+  parser = argparse.ArgumentParser(
+    description="Convert files to XLSX"
+  )
+  parser.add_argument("--verbose", "-v", action="count", default=0,
+                      help="increase verbosity")
+  parser.add_argument("--files-from", help="read src/dst from file")
+  parser.add_argument("--interactive", action="store_true",
+                      help="display Excel window")
+  parser.add_argument("--fallback", action="store_true",
+                      help="if first convertor is failed, try fallback")
+  parser.add_argument("--libreoffice-path", default=None,
+                      help="specify the path to LibreOffice")
+  args = parser.parse_args()
+  if args.libreoffice_path is None:
+    args.libreoffice_path = find_libreoffice()
+
+  return args
+
+
 def normalize_by_copy(src, dst, args):
   if args.verbose > 2:
     print(f"copy     {src} -> {dst}", file=sys.stderr)
@@ -116,7 +124,7 @@ def normalize_by_excel(src, dst, args):
 
 
 def normalize_by_libreoffice(src, dst, args):
-  soffice = find_libreoffice()
+  soffice = args.libreoffice_path
 
   if soffice is None:
     raise RuntimeError("LibreOffice not found")
@@ -161,51 +169,63 @@ def process_pair(src, dst, use_excel, args):
     normalize_by_copy(src, dst, args)
 
   elif use_excel:
-    normalize_by_excel(src, dst, args)
+    try:
+      normalize_by_excel(src, dst, args)
+    except Exception as err:
+      if args.fallback and args.libreoffice_path is not None:
+        print(f"Excel failed for {src}, try LibreOffice", file=sys.stderr)
+        normalize_by_libreoffice(src, dst, args)
+      else:
+        print(f"ERROR: {src}: {err}", file=sys.stderr)
 
   else:
     normalize_by_libreoffice(src, dst, args)
 
 
 def main():
-    args = parse_args()
+  args = parse_args()
 
-    use_excel = excel_available()
+  use_excel = excel_available()
 
-    if use_excel:
-        print("backend: Excel", file=sys.stderr)
+  if use_excel:
+    print("backend: Excel", file=sys.stderr)
 
-    else:
-        print("backend: LibreOffice", file=sys.stderr)
+  elif args.libreoffice_path is not None:
+    print("backend: LibreOffice", file=sys.stderr)
 
-    failed = False
+  else:
+    print("backend: none", file=sys.stderr)
+    sys.exit(1)
 
 
-    ctx = (
-      nullcontext(sys.stdin)
-      if args.files_from is None or args.files_from == "-"
-      else open(args.files_from, "r", encoding="utf-8")
-    )
-    with ctx as fh:
-      for line in fh:
-        line = line.rstrip("\r\n")
-        if not line:
-          continue
-        if line.startswith("#"):
-          continue
-        if "\t" not in line:
-          continue
+  failed = False
 
-        src, dst = line.split("\t", 1)
 
-        try:
-          process_pair(src, dst, use_excel, args)
+  ctx = (
+    nullcontext(sys.stdin)
+    if args.files_from is None or args.files_from == "-"
+    else open(args.files_from, "r", encoding="utf-8")
+  )
+  with ctx as fh:
+    for line in fh:
+      line = line.rstrip("\r\n")
+      if not line:
+        continue
+      if line.startswith("#"):
+        continue
+      if "\t" not in line:
+        continue
 
-        except Exception as e:
-          failed = True
+      src, dst = line.split("\t", 1)
 
-          print(f"ERROR: {src}: {e}", file=sys.stderr)
-    sys.exit(1 if failed else 0)
+      try:
+        process_pair(src, dst, use_excel, args)
+
+      except Exception as e:
+        failed = True
+        print(f"ERROR: {src}: {e}", file=sys.stderr)
+
+  sys.exit(1 if failed else 0)
 
 if __name__ == "__main__":
     main()
