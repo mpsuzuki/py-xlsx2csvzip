@@ -5,8 +5,40 @@ import argparse
 import shutil
 import subprocess
 import zipfile
+import olefile
 from pathlib import Path
 from contextlib import nullcontext
+
+
+# check path is a binary (OLE) file including "Workbook" or "Book"
+# which is supposed to be an old Excel binary file.
+def is_ole_xls(path):
+  try:
+    ole = olefile.OleFileIO(path)
+    return (ole.exists("Workbook") or ole.exists("Book"))
+  except Exception:
+    return False
+
+
+def is_html(path):
+  with open(path, "rb") as fh:
+    head = fh.read(4096).lower()
+  return (
+    b"<html" in head
+    or b"<!doctype html" in head
+    or b"<head" in head
+  )
+
+
+def classify_html(path):
+  text = Path(path).read_text(encoding="utf-8", errors="ignore").lower()
+
+  if "sharepoint.com" in text:
+    return "HTML_SHAREPOINT"
+  elif "onedrive.com" in text:
+    return "HTML_ONEDRIVE"
+  else:
+    return "HTML_UNKNOWN"
 
 
 IS_WINDOWS = sys.platform.startswith("win32")
@@ -125,7 +157,6 @@ def normalize_by_excel(src, dst, args):
 
 def normalize_by_libreoffice(src, dst, args):
   soffice = args.libreoffice_path
-
   if soffice is None:
     raise RuntimeError("LibreOffice not found")
 
@@ -147,10 +178,7 @@ def normalize_by_libreoffice(src, dst, args):
     check=True,
   )
 
-  generated = (
-    outdir
-    / (Path(src).stem + ".xlsx")
-  )
+  generated = ( outdir / (Path(src).stem + ".xlsx"))
 
   if generated != dst:
     if dst.exists():
@@ -168,7 +196,7 @@ def process_pair(src, dst, use_excel, args):
   if is_real_xlsx(src):
     normalize_by_copy(src, dst, args)
 
-  elif use_excel:
+  elif use_excel and is_ole_xls(src):
     try:
       normalize_by_excel(src, dst, args)
     except Exception as err:
@@ -179,7 +207,14 @@ def process_pair(src, dst, use_excel, args):
         print(f"ERROR: {src}: {err}", file=sys.stderr)
 
   else:
-    normalize_by_libreoffice(src, dst, args)
+    try:
+      normalize_by_libreoffice(src, dst, args)
+    except Exception as err:
+      if is_html(src):
+        html_type = classify_html(src)
+        print(f"ERROR: {src} is {html_type}")
+      else:
+        print(f"ERROR: {src} is unknown")
 
 
 def main():
