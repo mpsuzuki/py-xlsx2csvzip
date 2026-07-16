@@ -107,6 +107,7 @@ def parse_args():
   parser.add_argument("--verbose", "-v", action="count", default=0,
                       help="increase verbosity")
   parser.add_argument("--files-from", help="read src/dst from file")
+  parser.add_argument("--log", help="file to save log messages")
   parser.add_argument("--interactive", action="store_true",
                       help="display Excel window")
   parser.add_argument("--fallback", action="store_true",
@@ -122,7 +123,7 @@ def parse_args():
 
 def normalize_by_copy(src, dst, args):
   if args.verbose > 2:
-    print(f"copy     {src} -> {dst}", file=sys.stderr)
+    print(f"copy     {src} -> {dst}", file=args.log_fh)
   shutil.copy2(src, dst)
 
 
@@ -130,7 +131,7 @@ def normalize_by_excel(src, dst, args):
   import win32com.client
 
   if args.verbose > 1:
-    print(f"excel    {src} -> {dst}", file=sys.stderr)
+    print(f"excel    {src} -> {dst}", file=args.log_fh)
 
   excel = win32com.client.DispatchEx(
     "Excel.Application"
@@ -161,7 +162,7 @@ def normalize_by_libreoffice(src, dst, args):
     raise RuntimeError("LibreOffice not found")
 
   if args.verbose > 1:
-    print(f"libre    {src} -> {dst}", file=sys.stderr)
+    print(f"libre    {src} -> {dst}", file=args.log_fh)
 
   outdir = Path(dst).parent
 
@@ -201,10 +202,10 @@ def process_pair(src, dst, use_excel, args):
       normalize_by_excel(src, dst, args)
     except Exception as err:
       if args.fallback and args.libreoffice_path is not None:
-        print(f"Excel failed for {src}, try LibreOffice", file=sys.stderr)
+        print(f"Excel failed for {src}, try LibreOffice", file=args.log_fh)
         normalize_by_libreoffice(src, dst, args)
       else:
-        print(f"ERROR: {src}: {err}", file=sys.stderr)
+        print(f"ERROR: {src}: {err}", file=args.log_fh)
 
   else:
     try:
@@ -212,24 +213,29 @@ def process_pair(src, dst, use_excel, args):
     except Exception as err:
       if is_html(src):
         html_type = classify_html(src)
-        print(f"ERROR: {src} is {html_type}")
+        print(f"ERROR: {src} is {html_type}", file=args.log_fh)
       else:
-        print(f"ERROR: {src} is unknown")
+        print(f"ERROR: {src} is unknown", file=args.log_fh)
 
 
 def main():
   args = parse_args()
 
+  if args.log is not None and args.log != "-":
+    args.log_fh = open(args.log, "w", encoding="utf-8")
+  else:
+    args.log_fh = sys.stderr
+
   use_excel = excel_available()
 
   if use_excel:
-    print("backend: Excel", file=sys.stderr)
+    print("backend: Excel", file=args.log_fh)
 
   elif args.libreoffice_path is not None:
-    print("backend: LibreOffice", file=sys.stderr)
+    print("backend: LibreOffice", file=args.log_fh)
 
   else:
-    print("backend: none", file=sys.stderr)
+    print("backend: none", file=args.log_fh)
     sys.exit(1)
 
 
@@ -258,7 +264,10 @@ def main():
 
       except Exception as e:
         failed = True
-        print(f"ERROR: {src}: {e}", file=sys.stderr)
+        print(f"ERROR: {src}: {e}", file=args.log_fh)
+
+  if args.log_fh != sys.stderr:
+    args.log_fh.close()
 
   sys.exit(1 if failed else 0)
 
