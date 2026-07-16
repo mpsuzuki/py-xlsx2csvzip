@@ -16,6 +16,8 @@ def parse_args():
   parser.add_argument("--verbose", "-v", action="count", default=0,
                       help="increase verbosity")
   parser.add_argument("--files-from", help="read src/dst from file")
+  parser.add_argument("--interactive", action="store_true",
+                      help="display Excel window")
   return parser.parse_args()
 
 
@@ -95,8 +97,8 @@ def normalize_by_excel(src, dst, args):
   )
 
   try:
-    excel.Visible = False
-    excel.DisplayAlerts = False
+    excel.Visible = args.interactive
+    excel.DisplayAlerts = args.interactive
 
     wb = excel.Workbooks.Open(str(src))
 
