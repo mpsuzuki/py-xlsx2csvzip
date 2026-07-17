@@ -174,6 +174,11 @@ def parse_args():
     action="store_true",
     help="force LibreOffice output to be named 'value.csv' instead of 'value_libre.csv'",
   )
+  parser.add_argument(
+    "--no-clobber", "-nc",
+    action="store_true",
+    help="do not clobber existing file",
+  )
 
   return parser.parse_args()
 
@@ -394,6 +399,10 @@ def process_single_xlsx(args, xlsx_path_str):
       zip_path = Path(args.dir) / f"{xlsx_path.stem}.zip"
     else:
       zip_path = xlsx_path.with_suffix(".zip")
+
+  if args.no_clobber and zip_path.exists():
+    print(f"destination {str(zip_path)} is existing, skip conversion", file=sys.stderr)
+    return
 
   zfile = None
   if zip_path:
