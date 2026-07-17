@@ -84,5 +84,5 @@ but to extract really evaluated value, you need to have Excel and ```pywin32```.
    you can replace the venv name by your preferred name.
 2. ```. .\xlsx2csvzip\Scripts\Activate.ps1```
 3. ```python -m pip install --upgrade pip```
-4. ```pip install openpyxl pywin32```
+4. ```pip install openpyxl pywin32 olefile```
 
