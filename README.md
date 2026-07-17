@@ -69,6 +69,7 @@ but to extract really evaluated value, you need to have Excel and ```pywin32```.
 * et_xmlfile (in my case, 2.0.0)
 * openpyxl (in my case, 3.1.5)
 * pywin32 (in my case, 312)
+* psutil (in my case, 7.2.2)
 
 ## Setup for Win32
 ### Setup Your PowerShell environment
@@ -84,5 +85,5 @@ but to extract really evaluated value, you need to have Excel and ```pywin32```.
    you can replace the venv name by your preferred name.
 2. ```.\xlsx2csvzip\Scripts\Activate.ps1```
 3. ```python -m pip install --upgrade pip```
-4. ```pip install openpyxl pywin32 olefile```
+4. ```pip install openpyxl pywin32 olefile psutil```
 
