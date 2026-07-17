@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import psutil
+import json
 
 # Dynamically import Windows-specific libraries only when running on Windows
 import win32com.client
@@ -35,6 +37,13 @@ def parse_args():
   return parser.parse_args()
 
 
+GetWindowThreadProcessId = ctypes.windll.user32.GetWindowThreadProcessId
+GetWindowThreadProcessId.argtypes = [
+  wintypes.HWND,
+  ctypes.POINTER(wintypes.DWORD),
+]
+GetWindowThreadProcessId.restype = wintypes.DWORD
+
 OpenClipboard = ctypes.windll.user32.OpenClipboard
 CloseClipboard = ctypes.windll.user32.CloseClipboard
 GetClipboardData = ctypes.windll.user32.GetClipboardData
@@ -54,6 +63,12 @@ GetEnhMetaFileBits.restype = wintypes.UINT
 DeleteEnhMetaFile = ctypes.windll.gdi32.DeleteEnhMetaFile
 DeleteEnhMetaFile.argtypes = [wintypes.HANDLE]
 DeleteEnhMetaFile.restype = wintypes.BOOL
+
+
+def hwnd_to_pid(hwnd):
+  pid = wintypes.DWORD()
+  GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+  return pid.value
 
 
 def classify(cell):
@@ -236,6 +251,20 @@ def process_single_xlsx(args):
   try:
     print("  dispatch Excel", file=sys.stderr)
     excel = win32com.client.DispatchEx("Excel.Application")
+
+    pid = hwnd_to_pid(excel.Hwnd)
+    psinfo = psutil.Process(pid)
+    pidinfo = {
+      "pid": pid,
+      "hwnd": excel.Hwnd,
+      "exe": psinfo.exe(),
+      "cmdline": psinfo.cmdline(),
+      "name": psinfo.name(),
+      "create_time": psinfo.create_time(),
+    }
+    pidjson = Path(args.dir) / "excel-pid.json"
+    pidjson.write_text(json.dumps(pidinfo, indent=2), encoding="utf-8")
+
     touch_stage(args, "excel-started")
     excel.Visible = args.interactive
     excel.DisplayAlerts = args.interactive

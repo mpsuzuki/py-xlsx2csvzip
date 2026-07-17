@@ -11,6 +11,9 @@ import sys
 from pathlib import Path
 import tempfile
 import zipfile
+import re
+import json
+import psutil
 
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
@@ -170,11 +173,24 @@ def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
   ]
   try:
     touch_stage(workdir_path, f"{worker_name}-called-timeout{int_timeout}")
+    print(f"call {worker_name}", file=sys.stderr,)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=int_timeout,)
 
   except subprocess.TimeoutExpired as e:
     print(f"{worker_name} timed out", file=sys.stderr,)
     touch_stage(workdir_path, f"{worker_name}-expired-timeout")
+    pidjson = workdir_path / re.sub('xlsx2csv-(.*)\\.py', '\\1-pid.json', worker_name)
+    print(f"  lookup {pidjson}", file=sys.stderr,)
+    if pidjson.exists():
+      print(f"  found {pidjson}", file=sys.stderr,)
+      touch_stage(workdir_path, f"{worker_name}-pidjson-found")
+      pidinfo = json.loads( pidjson.read_text(encoding="utf-8") )
+      pid = pidinfo["pid"]
+      ps = psutil.Process(pid)
+      if ps.name() == pidinfo["name"] and abs(ps.create_time() - pidinfo["create_time"]) < 1.0:
+        print(f"  kill {pid}", file=sys.stderr,)
+        touch_stage(workdir_path, f"{worker_name}-pid{pid}-kill")
+        ps.kill()
     return False
 
   if result.returncode != 0:
