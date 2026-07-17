@@ -155,6 +155,34 @@ def create_output_stream(dir_path, title, suffix):
     yield f
 
 
+def touch_stage(dir, stage):
+  Path(dir, stage).touch()
+
+
+def run_worker(args, worker_name, workdir_path, xlsx_path):
+  cmd = [ sys.executable,
+    Path(__file__).resolve().parent / worker_name,
+    "--dir", str(workdir_path),
+    str(xlsx_path),
+  ]
+  try:
+    touch_stage(workdir_path, f"{worker_name}-called")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60,)
+
+  except subprocess.TimeoutExpired:
+    print(f"{worker_name} timed out: {result.stderr}", file=sys.stderr,)
+    touch_stage(workdir_path, f"{worker_name}-timeout")
+    return False
+
+  if result.returncode != 0:
+    print(f"Excel worker failed: {result.returncode}", file=sys.stderr,)
+    print(f"  {result.stderr}", file=sys.stderr,)
+    touch_stage(workdir_path, f"{worker_name}-failed")
+    return False
+
+  return True
+
+
 def process_single_xlsx(args, xlsx_path_str):
   xlsx_path = Path(xlsx_path_str).resolve()
   print(f"\nProcessing: {xlsx_path}", file=sys.stderr)
@@ -199,6 +227,10 @@ def process_single_xlsx(args, xlsx_path_str):
       for ws in wb_cached.worksheets:
         with create_output_stream(workdir_path, ws.title, "cached.csv") as o:
           write_csv(iter_cell_rows(ws), o)
+
+    if not run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path):
+      run_worker(args, "xlsx2csv-libre.py", workdir_path, xlsx_path)
+
 
   except Exception as e:
     print("something goes wrong", file=sys.stderr)
