@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-import tempfile
 
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
@@ -140,21 +139,34 @@ def open_output_stream(args, outfile):
     yield f
 
 
+def ensure_output_dir(args):
+  outdir = Path(args.dir)
+  outdir.mkdir(parents=True, exist_ok=True)
+  return outdir
+
+
+def touch_stage(args, stage):
+  Path(args.dir, stage).touch()
+
+
 def process_with_libreoffice(args):
   """Evaluates formulas via LibreOffice headless conversion, exports value.csv,
 
-  and extracts embedded charts via an HTML conversion hack.
+  and extracts embedded images via an HTML conversion hack.
   """
-  print("  evaluating formulas and extracting charts via LibreOffice", file=sys.stderr)
+  print("  evaluating formulas and extracting images via LibreOffice", file=sys.stderr)
   libre_cmd = get_libreoffice_command()
 
-  xlsx_path = Path(args.xlsx)
+  xlsx_path = Path(args.xlsx).resolve()
+  ensure_output_dir(args)
 
   # Enforce 'value.csv' if user specifies --force-value-name
   csv_suffix = "value.csv" if args.force_value_name else "value_libre.csv"
 
   workdir = Path(args.dir)
   scratchdir = workdir / "scratch"
+  if scratchdir.exists():
+    shutil.rmtree(scratchdir)
   scratchdir.mkdir(parents=True, exist_ok=True)
 
   # --- STEP 1: Formula Evaluation (Convert to XLSX) ---
@@ -164,48 +176,69 @@ def process_with_libreoffice(args):
     "--outdir", str(scratchdir),
     str(xlsx_path)
   ]
-  try:
-    subprocess.run(cmd_xlsx, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-  except Exception as e:
-    print(f"  Error: Failed to execute LibreOffice XLSX conversion: {e}", file=sys.stderr)
-    return
+  touch_stage(args, "libre-calculate-started")
+  result_calc = subprocess.run(cmd_xlsx, capture_output=True, text=True)
+  if result_calc.returncode != 0:
+    print(f"  Warning: LibreOffice failed to recalculate XLSX: {result_calc.returncode}", file=sys.stderr)
+    print(f"  LibreOffice message: {result_calc.stderr}", file=sys.stderr)
+    return False
 
   calculated_xlsx = scratchdir / f"{xlsx_path.stem}.xlsx"
   if not calculated_xlsx.exists():
     print("  Error: LibreOffice output file was not found.", file=sys.stderr)
-      return
+    print(f"  LibreOffice message: {result_calc.stderr}", file=sys.stderr)
+    return False
 
-  wb_libre = load_workbook(str(calculated_xlsx), data_only=True)
+  touch_stage(args, "libre-calculate-finished")
+  try:
+    wb_libre = load_workbook(str(calculated_xlsx), data_only=True)
+  except Exception as e:
+    print(f"  Error: Failed to parse calculated XLSX by openpyxl: {e}", file=sys.stderr)
+    return False
+
   for ws in wb_libre.worksheets:
-    with open_output_stream(args, zfile, ws.title, csv_suffix) as o:
+    output_pathname = compose_output_pathname(args, ws.title, csv_suffix)
+    with open_output_stream(args, output_pathname) as o:
       write_csv(iter_cell_rows(ws), o)
 
   # --- STEP 2: Chart Extraction Hack (Convert to HTML) ---
-  # LibreOffice outputs embedded shapes/charts as sequential 'img0.png', 'img1.png'...
+  # LibreOffice outputs embedded shapes/charts
   cmd_html = [
     libre_cmd, "--headless",
     "--convert-to", "html",
     "--outdir", str(scratchdir),
     str(xlsx_path)
   ]
-  try:
-    subprocess.run(cmd_html, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-  except Exception as e:
-    print(f"  Warning: Failed to execute LibreOffice HTML conversion for charts: {e}", file=sys.stderr)
-    return
 
-  # Scan and process all extracted chart images chronologically
-  extracted_images = sorted(tmpdir_path.glob("*.png"))
+  touch_stage(args, "libre-html-started")
+  result_html = subprocess.run(cmd_html, capture_output=True, text=True)
+  if result_html.returncode != 0:
+    print(f"  Warning: LibreOffice failed to convert to HTML: {result_html.returncode}", file=sys.stderr)
+    print(f"  LibreOffice message: {result_html.stderr}", file=sys.stderr)
+    return False
 
-  for i, img_path in enumerate(extracted_images, start=1):
-    chart_filename = f"libre_chart_{i}.png"
-    dest_path = workdir / chart_filename
-    shutil.copy2(img_path, dest_path)
-    print(f"  create {dest_path}", file=sys.stderr)
+  touch_stage(args, "libre-html-finished")
+
+  # Scan and process all extracted images chronologically
+  extracted_images = sorted(scratchdir.glob("*.png"))
+  if len(extracted_images) == 0:
+    touch_stage(args, "libre-html-no-png")
+  else:
+    digits = len(str(len(extracted_images)))
+
+    for i, img_path in enumerate(extracted_images, start=1):
+      extracted_filename = f"libre_extracted_{i:0{digits}d}.png"
+      dest_path = workdir / extracted_filename
+      shutil.copy2(img_path, dest_path)
+      print(f"  create {dest_path}", file=sys.stderr)
+
+  return True
 
 
 def main():
-  process_single_xlsx(parse_args())
+  ok = process_with_libreoffice(parse_args())
+  sys.exit(0 if ok else 1)
+
 
 if __name__ == "__main__":
   main()
