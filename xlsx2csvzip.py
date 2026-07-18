@@ -15,6 +15,7 @@ import re
 import json
 import psutil
 import time
+from collections import Counter
 
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
@@ -261,6 +262,15 @@ def process_single_xlsx(args, xlsx_path_str):
   xlsx_path = Path(xlsx_path_str).resolve()
   print(f"\nProcessing: {xlsx_path}", file=sys.stderr)
 
+  summary = {}
+  summary["xlsx"] = str(xlsx_path.name)
+  summary["excel_timeout"] = args.excel_timeout
+  summary["libre_timeout"] = args.libre_timeout
+  timings = {}
+  summary["timings"] = timings
+  summary["status"] = "fail"
+  summary["backend"] = "none"
+
   # Determine the target ZIP file path
   zip_path = None
   if args.zip:
@@ -278,19 +288,13 @@ def process_single_xlsx(args, xlsx_path_str):
   elif args.rawdir is not None:
     workdir_path = Path(args.rawdir)
   else:
-    return False
+    return summary
 
   if args.no_clobber and zip_path.exists():
     print(f"destination {str(zip_path)} is existing, skip conversion", file=sys.stderr)
-    return False
+    return summary
 
   try:
-    summary = {}
-    summary["xlsx"] = str(xlsx_path.name)
-    summary["excel_timeout"] = args.excel_timeout
-    summary["libre_timeout"] = args.libre_timeout
-    timings = {}
-    summary["timings"] = timings
     timings["load_workbook"] = time.monotonic()
     # openpyxl static side (Runs on any OS)
     wb = load_workbook(str(xlsx_path), data_only=False)
@@ -318,8 +322,6 @@ def process_single_xlsx(args, xlsx_path_str):
 
     excel_ok = False
     libre_ok = False
-    summary["status"] = "fail"
-    summary["backend"] = "none"
     timings["emit_value_excel"] = time.monotonic()
     excel_ok = run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path, args.excel_timeout)
     timings["emit_value_excel"] = time.monotonic() - timings["emit_value_excel"]
@@ -341,7 +343,7 @@ def process_single_xlsx(args, xlsx_path_str):
     )
 
     if not excel_ok and not libre_ok:
-      return False
+      return summary
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED,) as zf:
       # print(f"  {zip_path} packing started", file=sys.stderr)
@@ -365,12 +367,35 @@ def process_single_xlsx(args, xlsx_path_str):
     print("something goes wrong", file=sys.stderr)
 
   finally:
-
     print("finished", file=sys.stderr)
+
+  return summary
+
+def summarize(summaries):
+  backend_counter = Counter()
+  status_counter = Counter()
+  timing_collection = {}
+  for xlsx,summary in summaries.items():
+    status_counter[summary["status"]] += 1
+    backend_counter[summary["backend"]] += 1
+    for k, v in summary["timings"].items():
+      if not k in timing_collection:
+        timing_collection[k] = [v]
+      else:
+        timing_collection[k].append(v)
+
+  print(f"summary of {len(summaries)} results", file=sys.stderr)
+  print("backend", file=sys.stderr)
+  for k,v in backend_counter.items():
+    print(f"  {k}={v}")
+  print("timings", file=sys.stderr)
+  for k,v in timing_collection.items():
+    print(f"  timing {k}: avg={sum(v)/len(v):.2f} max={max(v):.2f}", file=sys.stderr)
 
 
 def main():
   args = parse_args()
+  summaries = {}
 
   if args.files_from:
     ctx = (
@@ -382,13 +407,18 @@ def main():
       for xlsx_target in fh:
         xlsx_target = xlsx_target.rstrip("\r\n")
         print(f"open file {xlsx_target} specified by file list", file=sys.stderr)
-        process_single_xlsx(args, xlsx_target)
+        summary = process_single_xlsx(args, xlsx_target)
+        summaries[xlsx_target] = summary
+        summarize(summaries)
   else:
     print(args.xlsx)
     # Iterate over all provided XLSX targets
     for xlsx_target in args.xlsx:
       print(f"open file {xlsx_target} specified by argument", file=sys.stderr)
-      process_single_xlsx(args, xlsx_target)
+      summary = process_single_xlsx(args, xlsx_target)
+      summaries[xlsx_target] = summary
+      summarize(summaries)
+
 
 
 if __name__ == "__main__":
