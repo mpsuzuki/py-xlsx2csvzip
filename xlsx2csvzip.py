@@ -152,6 +152,9 @@ def parse_args():
   parser.add_argument("--libre-timeout", type=int, default=10, help="timeout for LibreOffice worker")
   parser.add_argument("--debug", action="store_true", help="debug mode")
   parser.add_argument("--keep-work", action="store_true", help="keep working directory even if zip file is done")
+  parser.add_argument("--bom", action="store_true",
+    help="add BOM to CSV files",
+  )
 
   return parser.parse_args()
 
@@ -189,10 +192,14 @@ def cleanup_dir(dir):
 
 
 @contextmanager
-def create_output_stream(dir_path, title, suffix):
+def create_output_stream(args, dir_path, title, suffix):
   output_path = compose_output_pathname(dir_path, title, suffix)
   print(f"  create {output_path}", file=sys.stderr)
-  with open(output_path, "w", newline="", encoding="utf-8") as f:
+  if args.bom:
+    csv_enc = "utf-8-sig"
+  else:
+    csv_enc = "utf-8"
+  with open(output_path, "w", newline="", encoding=csv_enc) as f:
     yield f
 
 
@@ -305,10 +312,10 @@ def process_single_xlsx(args, xlsx_path_str):
 
     timings["emit_format_formula"] = time.monotonic()
     for ws in wb.worksheets:
-      with create_output_stream(workdir_path, ws.title, "format.csv") as o:
+      with create_output_stream(args, workdir_path, ws.title, "format.csv") as o:
         write_csv(iter_format_rows(ws), o)
 
-      with create_output_stream(workdir_path, ws.title, "formula.csv") as o:
+      with create_output_stream(args, workdir_path, ws.title, "formula.csv") as o:
         write_csv(iter_cell_rows(ws), o)
     timings["emit_format_formula"] = time.monotonic() - timings["emit_format_formula"]
 
@@ -316,7 +323,7 @@ def process_single_xlsx(args, xlsx_path_str):
       timings["emit_cached"] = time.monotonic()
       wb_cached = load_workbook(str(xlsx_path), data_only=True)
       for ws in wb_cached.worksheets:
-        with create_output_stream(workdir_path, ws.title, "cached.csv") as o:
+        with create_output_stream(args, workdir_path, ws.title, "cached.csv") as o:
           write_csv(iter_cell_rows(ws), o)
       timings["emit_cached"] = time.monotonic() - timings["emit_cached"]
 

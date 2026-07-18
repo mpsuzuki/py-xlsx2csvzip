@@ -42,6 +42,9 @@ def parse_args():
     action="store_true",
     help="force LibreOffice output to be named 'value.csv' instead of 'value_libre.csv'",
   )
+  parser.add_argument("--bom", action="store_true",
+    help="add BOM to CSV files",
+  )
 
   return parser.parse_args()
 
@@ -135,7 +138,11 @@ def compose_output_pathname(args, basename, suffix):
 @contextmanager
 def open_output_stream(args, outfile):
   print(f"  create {outfile}", file=sys.stderr)
-  with open(outfile, "w", newline="", encoding="utf-8") as f:
+  if args.bom:
+    csv_enc = "utf-8-sig"
+  else:
+    csv_enc = "utf-8"
+  with open(outfile, "w", newline="", encoding=csv_enc) as f:
     yield f
 
 
