@@ -14,6 +14,7 @@ import zipfile
 import re
 import json
 import psutil
+import time
 
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
@@ -284,30 +285,63 @@ def process_single_xlsx(args, xlsx_path_str):
     return False
 
   try:
+    summary = {}
+    summary["xlsx"] = str(xlsx_path.name)
+    summary["excel_timeout"] = args.excel_timeout
+    summary["libre_timeout"] = args.libre_timeout
+    timings = {}
+    summary["timings"] = timings
+    timings["load_workbook"] = time.monotonic()
     # openpyxl static side (Runs on any OS)
     wb = load_workbook(str(xlsx_path), data_only=False)
+    timings["load_workbook"] = time.monotonic() - timings["load_workbook"]
 
     cleanup_dir(workdir_path)
     emit_properties_json(args, wb, workdir_path)
+
+    timings["emit_format_formula"] = time.monotonic()
     for ws in wb.worksheets:
       with create_output_stream(workdir_path, ws.title, "format.csv") as o:
         write_csv(iter_format_rows(ws), o)
 
       with create_output_stream(workdir_path, ws.title, "formula.csv") as o:
         write_csv(iter_cell_rows(ws), o)
+    timings["emit_format_formula"] = time.monotonic() - timings["emit_format_formula"]
 
     if args.cached:
+      timings["emit_cached"] = time.monotonic()
       wb_cached = load_workbook(str(xlsx_path), data_only=True)
       for ws in wb_cached.worksheets:
         with create_output_stream(workdir_path, ws.title, "cached.csv") as o:
           write_csv(iter_cell_rows(ws), o)
+      timings["emit_cached"] = time.monotonic() - timings["emit_cached"]
 
-    if not run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path, args.excel_timeout):
-      if args.fallback:
-        run_worker(args, "xlsx2csv-libre.py", workdir_path, xlsx_path, args.libre_timeout)
-      else:
-        return False
+    excel_ok = False
+    libre_ok = False
+    summary["status"] = "fail"
+    summary["backend"] = "none"
+    timings["emit_value_excel"] = time.monotonic()
+    excel_ok = run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path, args.excel_timeout)
+    timings["emit_value_excel"] = time.monotonic() - timings["emit_value_excel"]
 
+    if excel_ok:
+      summary["status"] = "ok"
+      summary["backend"] = "excel"
+    elif args.fallback:
+      timings["emit_value_libre"] = time.monotonic()
+      libre_ok = run_worker(args, "xlsx2csv-libre.py", workdir_path, xlsx_path, args.libre_timeout)
+      timings["emit_value_libre"] = time.monotonic() - timings["emit_value_libre"]
+      if libre_ok:
+        summary["status"] = "ok"
+        summary["backend"] = "libre"
+
+    Path(workdir_path, "summary.json").write_text(
+      json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=False,),
+      encoding="utf-8",
+    )
+
+    if not excel_ok and not libre_ok:
+      return False
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED,) as zf:
       # print(f"  {zip_path} packing started", file=sys.stderr)
