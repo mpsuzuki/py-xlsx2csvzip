@@ -18,6 +18,37 @@ import psutil
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
 
+# suffixes of the files to be zipped by default
+SUFFIXES_IN_ZIP = [
+  ".csv", ".png", ".emf", ".json"
+]
+
+SUFFIXES_OUT_ZIP = [
+  "-pid.json"
+]
+
+
+def should_include_in_zip(args, workdir_path, target_path):
+  if args.debug:
+    return True
+
+  workdir_path = Path(workdir_path)
+  target_path  = Path(target_path)
+
+  rel = target_path.relative_to(workdir_path)
+  if rel.parts[0] == "scratch":
+    return False
+
+  if target_path.suffix not in SUFFIXES_IN_ZIP:
+      return False
+
+  for s in SUFFIXES_OUT_ZIP:
+    if target_path.name.endswith(s):
+      return False
+
+  return True
+
+
 # Check if the operating system is Windows
 IS_WINDOWS = sys.platform.startswith("win32")
 
@@ -117,6 +148,8 @@ def parse_args():
   parser.add_argument("--fallback", action="store_true", help="try LibreOffice if Excel failed")
   parser.add_argument("--excel-timeout", type=int, default=60, help="timeout for Excel worker")
   parser.add_argument("--libre-timeout", type=int, default=10, help="timeout for LibreOffice worker")
+  parser.add_argument("--debug", action="store_true", help="debug mode")
+  parser.add_argument("--keep-work", action="store_true", help="keep working directory even if zip file is done")
 
   return parser.parse_args()
 
@@ -275,10 +308,30 @@ def process_single_xlsx(args, xlsx_path_str):
       else:
         return False
 
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED,) as zf:
+      # print(f"  {zip_path} packing started", file=sys.stderr)
+      touch_stage(workdir_path, "zip-packing-started")
+      for path in Path(workdir_path).rglob("*"):
+        rel_path = path.relative_to(workdir_path)
+        # print(f"  test {path}", file=sys.stderr)
+        if not should_include_in_zip(args, workdir_path, path):
+          # print(f"  {zip_path.name} excludes {rel_path}", file=sys.stderr)
+          continue
+        print(f"  {zip_path.name} includes {rel_path}", file=sys.stderr)
+        zf.write(path, rel_path,)
+      touch_stage(workdir_path, "zip-packing-done")
+      print(f"  {zip_path} completed", file=sys.stderr)
+
+    if not args.keep_work:
+      print(f"  remove {workdir_path}", file=sys.stderr)
+      shutil.rmtree(workdir_path)
+
   except Exception as e:
     print("something goes wrong", file=sys.stderr)
 
   finally:
+
     print("finished", file=sys.stderr)
 
 
