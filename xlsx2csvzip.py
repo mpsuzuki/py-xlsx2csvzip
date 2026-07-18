@@ -204,6 +204,25 @@ def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
   return True
 
 
+def emit_properties_json(args, wb, workdir_path):
+  props = wb.properties
+  meta = {}
+  for k, v in vars(props).items():
+    if v is None:
+      meta[k] = None
+    elif hasattr(v, "isoformat"):
+      meta[k] = v.isoformat()
+    else:
+      meta[k] = str(v)
+
+  touch_stage(workdir_path, "emit-workbook-properties-json-try")
+  Path(workdir_path, "workbook-properties.json").write_text(
+    json.dumps(meta, indent=2, ensure_ascii=False, sort_keys=True,),
+    encoding="utf-8",
+  )
+  touch_stage(workdir_path, "emit-workbook-properties-json-done")
+
+
 def process_single_xlsx(args, xlsx_path_str):
   xlsx_path = Path(xlsx_path_str).resolve()
   print(f"\nProcessing: {xlsx_path}", file=sys.stderr)
@@ -236,6 +255,7 @@ def process_single_xlsx(args, xlsx_path_str):
     wb = load_workbook(str(xlsx_path), data_only=False)
 
     cleanup_dir(workdir_path)
+    emit_properties_json(args, wb, workdir_path)
     for ws in wb.worksheets:
       with create_output_stream(workdir_path, ws.title, "format.csv") as o:
         write_csv(iter_format_rows(ws), o)
