@@ -166,6 +166,9 @@ def touch_stage(dir, stage):
 
 
 def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
+  worker_base = Path(worker_name).stem.removeprefix("xlsx2csv-")
+  worker_json = workdir_path / (worker_base + "-pid.json")
+
   cmd = [ sys.executable,
     str(Path(__file__).resolve().parent / worker_name),
     "--dir", str(workdir_path),
@@ -179,17 +182,16 @@ def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
   except subprocess.TimeoutExpired as e:
     print(f"{worker_name} timed out", file=sys.stderr,)
     touch_stage(workdir_path, f"{worker_name}-expired-timeout")
-    pidjson = workdir_path / re.sub('xlsx2csv-(.*)\\.py', '\\1-pid.json', worker_name)
-    print(f"  lookup {pidjson}", file=sys.stderr,)
-    if pidjson.exists():
-      print(f"  found {pidjson}", file=sys.stderr,)
-      touch_stage(workdir_path, f"{worker_name}-pidjson-found")
-      pidinfo = json.loads( pidjson.read_text(encoding="utf-8") )
-      pid = pidinfo["pid"]
+    print(f"  lookup {worker_json}", file=sys.stderr,)
+    if worker_json.exists():
+      print(f"  found {worker_json}", file=sys.stderr,)
+      touch_stage(workdir_path, f"{worker_base}-pidjson-found")
+      worker_info = json.loads( worker_json.read_text(encoding="utf-8") )
+      pid = worker_info["pid"]
       ps = psutil.Process(pid)
-      if ps.name() == pidinfo["name"] and abs(ps.create_time() - pidinfo["create_time"]) < 1.0:
+      if ps.name() == worker_info["name"] and abs(ps.create_time() - worker_info["create_time"]) < 1.0:
         print(f"  kill {pid}", file=sys.stderr,)
-        touch_stage(workdir_path, f"{worker_name}-pid{pid}-kill")
+        touch_stage(workdir_path, f"{worker_base}-pid{pid}-kill")
         ps.kill()
     return False
 
