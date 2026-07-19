@@ -26,6 +26,10 @@ from x2c_helper import open_output_stream
 from x2c_helper import ensure_output_dir
 from x2c_helper import touch_stage
 
+# Check if the operating system is Windows
+IS_WINDOWS = sys.platform.startswith("win32")
+DEFAULT_BACKENDS = ["excel", "libre"] if IS_WINDOWS else ["libre"]
+
 # suffixes of the files to be zipped by default
 SUFFIXES_IN_ZIP = [
   ".csv", ".png", ".emf", ".json"
@@ -55,10 +59,6 @@ def should_include_in_zip(args, workdir_path, target_path):
       return False
 
   return True
-
-
-# Check if the operating system is Windows
-IS_WINDOWS = sys.platform.startswith("win32")
 
 
 def classify(cell):
@@ -108,11 +108,6 @@ def parse_args():
     help="write cached.csv using values stored in workbook",
   )
   parser.add_argument(
-    "--eval",
-    action="store_true",
-    help="evaluate formulas with Excel (Windows only) and write value.csv",
-  )
-  parser.add_argument(
     "--libre",
     action="store_true",
     help="evaluate formulas with LibreOffice and write value_libre.csv",
@@ -127,7 +122,6 @@ def parse_args():
     action="store_true",
     help="do not clobber existing file",
   )
-  parser.add_argument("--fallback", action="store_true", help="try LibreOffice if Excel failed")
   parser.add_argument("--excel-timeout", type=int, default=60, help="timeout for Excel worker")
   parser.add_argument("--libre-timeout", type=int, default=10, help="timeout for LibreOffice worker")
   parser.add_argument("--debug", action="store_true", help="debug mode")
@@ -135,8 +129,23 @@ def parse_args():
   parser.add_argument("--bom", action="store_true",
     help="add BOM to CSV files",
   )
+  parser.add_argument(
+    "--backends", type=str, default=",".join(DEFAULT_BACKENDS),
+    help="comma separated backend order (default: %(default)s)"
+  )
+  parser.add_argument("--try-all-backends", action="store_true",
+    help="try all backends even after successfully converted"
+  )
 
-  return parser.parse_args()
+  args = parser.parse_args()
+  args.backends = [
+    b
+    for b in dict.fromkeys(
+      s.strip().lower()
+      for s in args.backends.split(",")
+    )
+  ]
+  return args
 
 
 def create_output_stream(args, dir_path, title, suffix):
@@ -217,12 +226,24 @@ def process_single_xlsx(args, xlsx_path_str):
 
   summary = {}
   summary["xlsx"] = str(xlsx_path.name)
-  summary["excel_timeout"] = args.excel_timeout
-  summary["libre_timeout"] = args.libre_timeout
+  summary["result"] = False
+  summary["backend"] = None
+
+  b_timeout = {
+    "excel": args.excel_timeout,
+    "libre": args.libre_timeout,
+  }
+  summary["timeout"] = b_timeout
+
+  b_attempted = []
+  summary["backend_attempted"] = b_attempted
+
+  b_result = {}
+  summary["backend_result"] = b_result
+
   timings = {}
   summary["timings"] = timings
-  summary["status"] = "fail"
-  summary["backend"] = "none"
+
 
   # Determine the target ZIP file path
   zip_path = None
@@ -270,27 +291,29 @@ def process_single_xlsx(args, xlsx_path_str):
           with create_output_stream(args, workdir_path, ws.title, "cached.csv") as o:
             write_csv(iter_cell_rows(ws), o)
 
-    excel_ok = False
-    libre_ok = False
-    with rec_elapsed(timings, "emit_value_excel"):
-      excel_ok = run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path, args.excel_timeout)
 
-    if excel_ok:
-      summary["status"] = "ok"
-      summary["backend"] = "excel"
-    elif args.fallback:
-      with rec_elapsed(timings, "emit_value_libre"):
-        libre_ok = run_worker(args, "xlsx2csv-libre.py", workdir_path, xlsx_path, args.libre_timeout)
-      if libre_ok:
-        summary["status"] = "ok"
-        summary["backend"] = "libre"
+    backend_result = {}
+    for b in args.backends:
+      b_attempted.append(b)
+      evb = "emit_value_" + b
+      with rec_elapsed(timings, evb):
+        b_result[b] = run_worker( args, f"xlsx2csv-{b}.py", workdir_path, xlsx_path, b_timeout[b])
 
+      if b_result[b]:
+        summary["result"] = True
+        if summary["backend"] is None:
+          summary["backend"] = b
+        if args.try_all_backends:
+          continue
+        break
+
+    print("write summary.json", file=sys.stderr)
     Path(workdir_path, "summary.json").write_text(
       json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=False,),
       encoding="utf-8",
     )
 
-    if not excel_ok and not libre_ok:
+    if not summary["result"]:
       return summary
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED,) as zf:
@@ -321,18 +344,29 @@ def process_single_xlsx(args, xlsx_path_str):
 
 def summarize(summaries):
   backend_counter = Counter()
-  status_counter = Counter()
   timing_collection = {}
   for xlsx,summary in summaries.items():
-    status_counter[summary["status"]] += 1
-    backend_counter[summary["backend"]] += 1
-    for k, v in summary["timings"].items():
-      if not k in timing_collection:
-        timing_collection[k] = [v]
-      else:
-        timing_collection[k].append(v)
+    timings = summary["timings"]
 
-  print(f"summary of {len(summaries)} results", file=sys.stderr)
+    for k,v in timings.items():
+      if k.startswith("emit_value_"):
+        continue
+      elif k not in timing_collection:
+        timing_collection[k] = []
+      timing_collection[k].append(v)
+
+    for b,result in summary["backend_result"].items():
+      if not result:
+        continue
+
+      backend_counter[b] += 1
+
+      evb = "emit_value_" + b
+      if evb not in timing_collection:
+        timing_collection[evb] = []
+      timing_collection[evb].append(timings[evb])
+
+  print(f"summary of {len(summaries)} files", file=sys.stderr)
   print("backend", file=sys.stderr)
   for k,v in backend_counter.items():
     print(f"  {k}={v}")
