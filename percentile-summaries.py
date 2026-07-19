@@ -15,6 +15,7 @@ def parse_args():
   )
   parser.add_argument("json", help="input json file")
   parser.add_argument("--show-top", type=int, default=10, help="show longest times")
+  parser.add_argument("--filenames", action="store_true", help="show filenames")
   return parser.parse_args()
 
 
@@ -29,7 +30,11 @@ def print_percentile(args, backend, smrs):
 
   for i in range(max(0, total - args.show_top), total):
     smr = smrs[i]
-    print(f"{backend} #{i:03d} {smr["timings"][evb]:06.2f}\t{smr['xlsx']}\t{smr['_zipfile']}")
+    print(f"{backend} #{i:03d} {smr["timings"][evb]:06.2f}", end="")
+    if args.filenames:
+      print(f"\t{smr['xlsx']}\t{smr['_zipfile']}")
+    else:
+      print("")
 
   print("")
 
