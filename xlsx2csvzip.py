@@ -20,6 +20,12 @@ from collections import Counter
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
 
+from x2c_helper import iter_cell_rows, write_csv
+from x2c_helper import compose_output_pathname
+from x2c_helper import open_output_stream
+from x2c_helper import ensure_output_dir
+from x2c_helper import touch_stage
+
 # suffixes of the files to be zipped by default
 SUFFIXES_IN_ZIP = [
   ".csv", ".png", ".emf", ".json"
@@ -70,32 +76,6 @@ def classify(cell):
 def iter_format_rows(ws):
   for row in ws.iter_rows():
     yield [classify(cell) for cell in row]
-
-
-def iter_cell_rows(ws):
-  for row in ws.iter_rows():
-    yield ["" if cell.value is None else cell.value for cell in row]
-
-
-def iter_value_rows(com_ws):
-  used = com_ws.UsedRange
-  rows = used.Rows.Count
-  cols = used.Columns.Count
-
-  for r in range(1, rows + 1):
-    values = []
-    for c in range(1, cols + 1):
-      value = com_ws.Cells(r, c).Value
-      if value is None:
-        value = ""
-      values.append(value)
-    yield values
-
-
-def write_csv(rows, stream):
-  writer = csv.writer(stream)
-  for row in rows:
-    writer.writerow(row)
 
 
 def parse_args():
@@ -159,52 +139,9 @@ def parse_args():
   return parser.parse_args()
 
 
-def safe_filename(name):
-  trans = str.maketrans(
-    {
-      "\\": "_",
-      "/": "_",
-      ":": "_",
-      "*": "_",
-      "?": "_",
-      '"': "_",
-      "<": "_",
-      ">": "_",
-      "|": "_",
-    }
-  )
-  return name.translate(trans)
-
-
-def compose_output_pathname(workdir_path, basename, suffix):
-  filename = f"{safe_filename(basename)}.{suffix}"
-  return workdir_path / filename
-
-
-def cleanup_dir(dir):
-  dir_path = Path(dir)
-
-  if dir_path.exists():
-    shutil.rmtree(dir_path)
-
-  dir_path.mkdir(parents=True, exist_ok=True)
-  return dir_path
-
-
-@contextmanager
 def create_output_stream(args, dir_path, title, suffix):
-  output_path = compose_output_pathname(dir_path, title, suffix)
-  print(f"  create {output_path}", file=sys.stderr)
-  if args.bom:
-    csv_enc = "utf-8-sig"
-  else:
-    csv_enc = "utf-8"
-  with open(output_path, "w", newline="", encoding=csv_enc) as f:
-    yield f
-
-
-def touch_stage(dir, stage):
-  Path(dir, stage).touch()
+  pathname = compose_output_pathname(dir_path, title, suffix)
+  return open_output_stream(pathname, bom=args.bom)
 
 
 def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
@@ -315,7 +252,7 @@ def process_single_xlsx(args, xlsx_path_str):
       # openpyxl static side (Runs on any OS)
       wb = load_workbook(str(xlsx_path), data_only=False)
 
-    cleanup_dir(workdir_path)
+    ensure_output_dir(workdir_path, recreate=True)
     emit_properties_json(args, wb, workdir_path)
 
     with rec_elapsed(timings, "emit_format_formula"):
@@ -378,7 +315,7 @@ def process_single_xlsx(args, xlsx_path_str):
     print("something goes wrong", file=sys.stderr)
 
   finally:
-    print("finished", file=sys.stderr)
+    print("finished\n", file=sys.stderr)
 
   return summary
 
