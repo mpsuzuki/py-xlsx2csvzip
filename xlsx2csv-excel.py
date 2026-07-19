@@ -74,28 +74,6 @@ def hwnd_to_pid(hwnd):
   return pid.value
 
 
-def classify(cell):
-  if cell.value is None:
-    return "EMPTY"
-  if is_date_format(cell.number_format):
-    return "DATETIME"
-  if cell.number_format == "General":
-    return "GENERAL"
-  if isinstance(cell.value, (int, float)):
-    return "NUMBER"
-  return "OTHER"
-
-
-def iter_format_rows(ws):
-  for row in ws.iter_rows():
-    yield [classify(cell) for cell in row]
-
-
-def iter_cell_rows(ws):
-  for row in ws.iter_rows():
-    yield ["" if cell.value is None else cell.value for cell in row]
-
-
 def iter_value_rows(com_ws):
   used = com_ws.UsedRange
   rows = used.Rows.Count
