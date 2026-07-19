@@ -67,8 +67,11 @@ def open_output_stream(outfile, bom = False):
 
 def ensure_output_dir(dir, recreate=False):
   outdir = Path(dir)
-  if recreate:
-    shutil.rmtree(dir)
+  if outdir.exists():
+    if recreate or not outdir.is_dir():
+      # print(f"rmtree {dir}", file=sys.stderr)
+      shutil.rmtree(dir)
+  # print(f"mkdir {dir}", file=sys.stderr)
   outdir.mkdir(parents=True, exist_ok=True)
   return outdir
 
