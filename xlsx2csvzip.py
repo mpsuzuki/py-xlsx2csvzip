@@ -265,6 +265,15 @@ def emit_properties_json(args, wb, workdir_path):
   touch_stage(workdir_path, "emit-workbook-properties-json-done")
 
 
+@contextmanager
+def rec_elapsed(dic, key):
+  time_start = time.monotonic()
+  try:
+    yield
+  finally:
+    dic[key] = time.monotonic() - time_start
+
+
 def process_single_xlsx(args, xlsx_path_str):
   xlsx_path = Path(xlsx_path_str).resolve()
   print(f"Processing: {xlsx_path}", file=sys.stderr)
@@ -302,44 +311,39 @@ def process_single_xlsx(args, xlsx_path_str):
     return summary
 
   try:
-    timings["load_workbook"] = time.monotonic()
-    # openpyxl static side (Runs on any OS)
-    wb = load_workbook(str(xlsx_path), data_only=False)
-    timings["load_workbook"] = time.monotonic() - timings["load_workbook"]
+    with rec_elapsed(timings, "load_workbook"):
+      # openpyxl static side (Runs on any OS)
+      wb = load_workbook(str(xlsx_path), data_only=False)
 
     cleanup_dir(workdir_path)
     emit_properties_json(args, wb, workdir_path)
 
-    timings["emit_format_formula"] = time.monotonic()
-    for ws in wb.worksheets:
-      with create_output_stream(args, workdir_path, ws.title, "format.csv") as o:
-        write_csv(iter_format_rows(ws), o)
+    with rec_elapsed(timings, "emit_format_formula"):
+      for ws in wb.worksheets:
+        with create_output_stream(args, workdir_path, ws.title, "format.csv") as o:
+          write_csv(iter_format_rows(ws), o)
 
-      with create_output_stream(args, workdir_path, ws.title, "formula.csv") as o:
-        write_csv(iter_cell_rows(ws), o)
-    timings["emit_format_formula"] = time.monotonic() - timings["emit_format_formula"]
+        with create_output_stream(args, workdir_path, ws.title, "formula.csv") as o:
+          write_csv(iter_cell_rows(ws), o)
 
     if args.cached:
-      timings["emit_cached"] = time.monotonic()
-      wb_cached = load_workbook(str(xlsx_path), data_only=True)
-      for ws in wb_cached.worksheets:
-        with create_output_stream(args, workdir_path, ws.title, "cached.csv") as o:
-          write_csv(iter_cell_rows(ws), o)
-      timings["emit_cached"] = time.monotonic() - timings["emit_cached"]
+      with rec_elapsed(timings, "emit_cached"):
+        wb_cached = load_workbook(str(xlsx_path), data_only=True)
+        for ws in wb_cached.worksheets:
+          with create_output_stream(args, workdir_path, ws.title, "cached.csv") as o:
+            write_csv(iter_cell_rows(ws), o)
 
     excel_ok = False
     libre_ok = False
-    timings["emit_value_excel"] = time.monotonic()
-    excel_ok = run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path, args.excel_timeout)
-    timings["emit_value_excel"] = time.monotonic() - timings["emit_value_excel"]
+    with rec_elapsed(timings, "emit_value_excel"):
+      excel_ok = run_worker(args, "xlsx2csv-excel.py", workdir_path, xlsx_path, args.excel_timeout)
 
     if excel_ok:
       summary["status"] = "ok"
       summary["backend"] = "excel"
     elif args.fallback:
-      timings["emit_value_libre"] = time.monotonic()
-      libre_ok = run_worker(args, "xlsx2csv-libre.py", workdir_path, xlsx_path, args.libre_timeout)
-      timings["emit_value_libre"] = time.monotonic() - timings["emit_value_libre"]
+      with rec_elapsed(timings, "emit_value_libre"):
+        libre_ok = run_worker(args, "xlsx2csv-libre.py", workdir_path, xlsx_path, args.libre_timeout)
       if libre_ok:
         summary["status"] = "ok"
         summary["backend"] = "libre"
