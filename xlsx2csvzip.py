@@ -267,7 +267,7 @@ def emit_properties_json(args, wb, workdir_path):
 
 def process_single_xlsx(args, xlsx_path_str):
   xlsx_path = Path(xlsx_path_str).resolve()
-  print(f"\nProcessing: {xlsx_path}", file=sys.stderr)
+  print(f"Processing: {xlsx_path}", file=sys.stderr)
 
   summary = {}
   summary["xlsx"] = str(xlsx_path.name)
