@@ -13,6 +13,12 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
 
+from x2c_helper import iter_cell_rows, write_csv
+from x2c_helper import compose_output_pathname
+from x2c_helper import open_output_stream
+from x2c_helper import ensure_output_dir
+from x2c_helper import touch_stage
+
 # Check if the operating system is Windows
 IS_WINDOWS = sys.platform.startswith("win32")
 IS_MAC = sys.platform.startswith("darwin")
@@ -66,64 +72,6 @@ def get_libreoffice_command():
     return "soffice"
 
 
-def iter_cell_rows(ws):
-  for row in ws.iter_rows():
-    yield ["" if cell.value is None else cell.value for cell in row]
-
-
-def write_csv(rows, stream):
-  writer = csv.writer(stream)
-  for row in rows:
-    writer.writerow(row)
-
-
-def safe_filename(name):
-  trans = str.maketrans(
-    {
-      "\\": "_",
-      "/": "_",
-      ":": "_",
-      "*": "_",
-      "?": "_",
-      '"': "_",
-      "<": "_",
-      ">": "_",
-      "|": "_",
-    }
-  )
-  return name.translate(trans)
-
-
-def compose_output_pathname(args, basename, suffix):
-  """Switches the target stream based on user arguments."""
-  filename = ".".join([safe_filename(basename), suffix])
-
-  outdir = Path(args.dir)
-  outfile = outdir / filename
-  return outfile
-
-
-@contextmanager
-def open_output_stream(args, outfile):
-  print(f"  create {outfile}", file=sys.stderr)
-  if args.bom:
-    csv_enc = "utf-8-sig"
-  else:
-    csv_enc = "utf-8"
-  with open(outfile, "w", newline="", encoding=csv_enc) as f:
-    yield f
-
-
-def ensure_output_dir(args):
-  outdir = Path(args.dir)
-  outdir.mkdir(parents=True, exist_ok=True)
-  return outdir
-
-
-def touch_stage(args, stage):
-  Path(args.dir, stage).touch()
-
-
 def process_with_libreoffice(args):
   """Evaluates formulas via LibreOffice headless conversion, exports value.csv,
 
@@ -133,7 +81,7 @@ def process_with_libreoffice(args):
   libre_cmd = get_libreoffice_command()
 
   xlsx_path = Path(args.xlsx).resolve()
-  ensure_output_dir(args)
+  ensure_output_dir(args.dir)
 
   # Enforce 'value.csv' if user specifies --force-value-name
   csv_suffix = "value.csv" if args.force_value_name else "value_libre.csv"
@@ -151,7 +99,7 @@ def process_with_libreoffice(args):
     "--outdir", str(scratchdir),
     str(xlsx_path)
   ]
-  touch_stage(args, "libre-calculate-started")
+  touch_stage(args.dir, "libre-calculate-started")
   result_calc = subprocess.run(cmd_xlsx, capture_output=True, text=True)
   if result_calc.returncode != 0:
     print(f"  Warning: LibreOffice failed to recalculate XLSX: {result_calc.returncode}", file=sys.stderr)
@@ -164,7 +112,7 @@ def process_with_libreoffice(args):
     print(f"  LibreOffice message: {result_calc.stderr}", file=sys.stderr)
     return False
 
-  touch_stage(args, "libre-calculate-finished")
+  touch_stage(args.dir, "libre-calculate-finished")
   try:
     wb_libre = load_workbook(str(calculated_xlsx), data_only=True)
   except Exception as e:
@@ -172,8 +120,8 @@ def process_with_libreoffice(args):
     return False
 
   for ws in wb_libre.worksheets:
-    output_pathname = compose_output_pathname(args, ws.title, csv_suffix)
-    with open_output_stream(args, output_pathname) as o:
+    output_pathname = compose_output_pathname(args.dir, ws.title, csv_suffix)
+    with open_output_stream(output_pathname, bom=args.bom) as o:
       write_csv(iter_cell_rows(ws), o)
 
   # --- STEP 2: Chart Extraction Hack (Convert to HTML) ---
@@ -185,19 +133,19 @@ def process_with_libreoffice(args):
     str(xlsx_path)
   ]
 
-  touch_stage(args, "libre-html-started")
+  touch_stage(args.dir, "libre-html-started")
   result_html = subprocess.run(cmd_html, capture_output=True, text=True)
   if result_html.returncode != 0:
     print(f"  Warning: LibreOffice failed to convert to HTML: {result_html.returncode}", file=sys.stderr)
     print(f"  LibreOffice message: {result_html.stderr}", file=sys.stderr)
     return False
 
-  touch_stage(args, "libre-html-finished")
+  touch_stage(args.dir, "libre-html-finished")
 
   # Scan and process all extracted images chronologically
   extracted_images = sorted(scratchdir.glob("*.png"))
   if len(extracted_images) == 0:
-    touch_stage(args, "libre-html-no-png")
+    touch_stage(args.dir, "libre-html-no-png")
   else:
     digits = len(str(len(extracted_images)))
 
