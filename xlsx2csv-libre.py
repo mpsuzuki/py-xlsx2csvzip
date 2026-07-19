@@ -66,41 +66,9 @@ def get_libreoffice_command():
     return "soffice"
 
 
-def classify(cell):
-  if cell.value is None:
-    return "EMPTY"
-  if is_date_format(cell.number_format):
-    return "DATETIME"
-  if cell.number_format == "General":
-    return "GENERAL"
-  if isinstance(cell.value, (int, float)):
-    return "NUMBER"
-  return "OTHER"
-
-
-def iter_format_rows(ws):
-  for row in ws.iter_rows():
-    yield [classify(cell) for cell in row]
-
-
 def iter_cell_rows(ws):
   for row in ws.iter_rows():
     yield ["" if cell.value is None else cell.value for cell in row]
-
-
-def iter_value_rows(com_ws):
-  used = com_ws.UsedRange
-  rows = used.Rows.Count
-  cols = used.Columns.Count
-
-  for r in range(1, rows + 1):
-    values = []
-    for c in range(1, cols + 1):
-      value = com_ws.Cells(r, c).Value
-      if value is None:
-        value = ""
-      values.append(value)
-    yield values
 
 
 def write_csv(rows, stream):
