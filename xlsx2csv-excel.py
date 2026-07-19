@@ -17,6 +17,13 @@ import win32com.client
 import ctypes
 from ctypes import wintypes
 
+from x2c_helper import iter_cell_rows, write_csv
+from x2c_helper import safe_filename
+from x2c_helper import compose_output_pathname
+from x2c_helper import open_output_stream
+from x2c_helper import ensure_output_dir
+from x2c_helper import touch_stage
+
 
 def parse_args():
   parser = argparse.ArgumentParser(
@@ -87,49 +94,6 @@ def iter_value_rows(com_ws):
         value = ""
       values.append(value)
     yield values
-
-
-def write_csv(rows, stream):
-  writer = csv.writer(stream)
-  for row in rows:
-    writer.writerow(row)
-
-
-def safe_filename(name):
-  trans = str.maketrans(
-    {
-      "\\": "_",
-      "/": "_",
-      ":": "_",
-      "*": "_",
-      "?": "_",
-      '"': "_",
-      "<": "_",
-      ">": "_",
-      "|": "_",
-    }
-  )
-  return name.translate(trans)
-
-
-def compose_output_pathname(args, basename, suffix):
-  """Switches the target stream based on user arguments."""
-  filename = ".".join([safe_filename(basename), suffix])
-
-  outdir = Path(args.dir)
-  outfile = outdir / filename
-  return outfile
-
-
-@contextmanager
-def open_output_stream(args, outfile):
-  print(f"  create {outfile}", file=sys.stderr)
-  if args.bom:
-    csv_enc = "utf-8-sig"
-  else:
-    csv_enc = "utf-8"
-  with open(outfile, "w", newline="", encoding=csv_enc) as f:
-    yield f
 
 
 def get_emf_bytes_from_clipboard():
@@ -216,21 +180,11 @@ def export_charts(args, com_ws):
           emf_path.unlink()
 
 
-def ensure_output_dir(args):
-  outdir = Path(args.dir)
-  outdir.mkdir(parents=True, exist_ok=True)
-  return outdir
-
-
-def touch_stage(args, stage):
-  Path(args.dir, stage).touch()
-
-
 def process_single_xlsx(args):
   xlsx_path = Path(args.xlsx).resolve()
   print(f"\nProcessing: {xlsx_path}", file=sys.stderr)
 
-  outdir = ensure_output_dir(args)
+  outdir = ensure_output_dir(args.dir)
 
   excel = None
   try:
@@ -250,19 +204,19 @@ def process_single_xlsx(args):
     pidjson = Path(args.dir) / "excel-pid.json"
     pidjson.write_text(json.dumps(pidinfo, indent=2), encoding="utf-8")
 
-    touch_stage(args, "excel-started")
+    touch_stage(args.dir, "excel-started")
     excel.Visible = args.interactive
     excel.DisplayAlerts = args.interactive
 
     com_wb = excel.Workbooks.Open(str(xlsx_path))
-    touch_stage(args, "excel-wb-started")
-    touch_stage(args, "excel-wb-opened")
+    touch_stage(args.dir, "excel-wb-started")
+    touch_stage(args.dir, "excel-wb-opened")
     excel.CalculateFullRebuild()
-    touch_stage(args, "excel-wb-calculated")
+    touch_stage(args.dir, "excel-wb-calculated")
 
     for com_ws in com_wb.Worksheets:
-      output_pathname = compose_output_pathname(args, com_ws.Name, "value.csv")
-      with open_output_stream(args, output_pathname) as o:
+      output_pathname = compose_output_pathname(args.dir, com_ws.Name, "value.csv")
+      with open_output_stream(output_pathname, args.bom) as o:
         # Path(args.dir, output_pathname.name + ".started").touch()
         write_csv(iter_value_rows(com_ws), o)
         # Path(args.dir, output_pathname.name + ".done").touch()
@@ -273,11 +227,11 @@ def process_single_xlsx(args):
   finally:
     if excel is None:
       print("  could not start Excel", file=sys.stderr)
-      touch_stage(args, "excel-not-started")
+      touch_stage(args.dir, "excel-not-started")
     else:
       print("  quit Excel", file=sys.stderr)
       excel.Quit()
-      touch_stage(args, "excel-finished")
+      touch_stage(args.dir, "excel-finished")
 
 
 def main():
