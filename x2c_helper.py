@@ -5,6 +5,33 @@ from pathlib import Path
 from contextlib import contextmanager
 
 # -----------------------------------------------------------------
+# shared strings
+
+STATUS_SUCCESS = "success"
+STATUS_FAILURE = "failure"
+STATUS_TIMEOUT = "timeout"
+
+def is_success(s):
+  return (s == STATUS_SUCCESS)
+
+def is_failure(s):
+  return (s == STATUS_FAILURE)
+
+def is_timeout(s):
+  return (s == STATUS_TIMEOUT)
+
+SUFFIX_FORMAT  = "format.csv"
+SUFFIX_FORMULA = "formula.csv"
+SUFFIX_CACHED  = "cached.csv"
+SUFFIX_VALUE   = "value.csv"
+
+def value_suffix(backend):
+  if backend == "excel" or backend is None or len(backend) == 0:
+    return SUFFIX_VALUE
+  else:
+    return f"value_{backend}.csv"
+
+# -----------------------------------------------------------------
 # translator from None to ""
 
 def iter_cell_rows(ws):
