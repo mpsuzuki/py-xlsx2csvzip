@@ -165,7 +165,6 @@ def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
   ]
   try:
     touch_stage(workdir_path, f"{worker_name}-called-timeout{int_timeout}")
-    print(f"call {worker_name}", file=sys.stderr,)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=int_timeout,)
 
   except subprocess.TimeoutExpired as e:
@@ -230,17 +229,13 @@ def process_single_xlsx(args, xlsx_path_str):
   summary["result"] = False
   summary["backend"] = None
 
-  b_timeout = {
+  timeouts = {
     "excel": args.excel_timeout,
     "libre": args.libre_timeout,
   }
-  summary["timeout"] = b_timeout
 
-  b_attempted = []
-  summary["backend_attempted"] = b_attempted
-
-  b_result = {}
-  summary["backend_result"] = b_result
+  b_results = []
+  summary["backend_results"] = b_results
 
   timings = {}
   summary["timings"] = timings
@@ -293,26 +288,32 @@ def process_single_xlsx(args, xlsx_path_str):
             write_csv(iter_cell_rows(ws), o)
 
 
-    backend_result = {}
     for b in args.backends:
-      b_attempted.append(b)
-      evb = "emit_value_" + b
-      with rec_elapsed(timings, evb):
-        b_result[b] = run_worker( args, f"xlsx2csv-{b}.py", workdir_path, xlsx_path, b_timeout[b])
+      worker_name = f"xlsx2csv-{b}.py"
+      r = {"name": b, "timeout": timeouts[b] }
+      b_results.append(r)
 
-      if b_result[b]:
+      print(f"call {worker_name}... ", end="", flush=True, file=sys.stderr,)
+      with rec_elapsed(r, "elapsed"):
+        r["status"] = run_worker(args, worker_name, workdir_path, xlsx_path, r["timeout"])
+      print(f"{r['status']} elapsed {r['elapsed']:.2f}", file=sys.stderr,)
+
+      # evb = "emit_value_" + b
+      # r["elapsed"] = timings[evb]
+      if x2c.is_success(r["status"]):
         summary["result"] = True
         if summary["backend"] is None:
           summary["backend"] = b
         if args.try_all_backends:
           continue
         break
+      else:
+        print("failed/timeout", file=sys.stderr,)
 
     print("write summary.json", file=sys.stderr)
-    Path(workdir_path, "summary.json").write_text(
-      json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=False,),
-      encoding="utf-8",
-    )
+    smr = json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=False,)
+    # print(smr, file=sys.stderr)
+    Path(workdir_path, "summary.json").write_text(smr, encoding="utf-8",)
 
     if not summary["result"]:
       return summary
@@ -356,8 +357,9 @@ def summarize(summaries):
         timing_collection[k] = []
       timing_collection[k].append(v)
 
-    for b,result in summary["backend_result"].items():
-      if not result:
+    for r in summary["backend_results"]:
+      b = r["name"]
+      if not x2c.is_success(r["status"]):
         continue
 
       backend_counter[b] += 1
@@ -365,7 +367,7 @@ def summarize(summaries):
       evb = "emit_value_" + b
       if evb not in timing_collection:
         timing_collection[evb] = []
-      timing_collection[evb].append(timings[evb])
+      timing_collection[evb].append(r["elapsed"])
 
   print(f"summary of {len(summaries)} files", file=sys.stderr)
   print("backend", file=sys.stderr)
