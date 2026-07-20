@@ -20,6 +20,7 @@ from collections import Counter
 from openpyxl import load_workbook
 from openpyxl.styles.numbers import is_date_format
 
+import x2c_helper as x2c
 from x2c_helper import iter_cell_rows, write_csv
 from x2c_helper import compose_output_pathname
 from x2c_helper import open_output_stream
@@ -181,15 +182,15 @@ def run_worker(args, worker_name, workdir_path, xlsx_path, int_timeout):
         print(f"  kill {pid}", file=sys.stderr,)
         touch_stage(workdir_path, f"{worker_base}-pid{pid}-kill")
         ps.kill()
-    return False
+    return x2c.STATUS_TIMEOUT
 
   if result.returncode != 0:
     print(f"{worker_name} worker failed: {result.returncode}", file=sys.stderr,)
     print(f"  {result.stderr}", file=sys.stderr,)
     touch_stage(workdir_path, f"{worker_name}-failed")
-    return False
+    return x2c.STATUS_FAILURE
 
-  return True
+  return x2c.STATUS_SUCCESS
 
 
 def emit_properties_json(args, wb, workdir_path):
@@ -278,17 +279,17 @@ def process_single_xlsx(args, xlsx_path_str):
 
     with rec_elapsed(timings, "emit_format_formula"):
       for ws in wb.worksheets:
-        with create_output_stream(args, workdir_path, ws.title, "format.csv") as o:
+        with create_output_stream(args, workdir_path, ws.title, x2c.SUFFIX_FORMAT) as o:
           write_csv(iter_format_rows(ws), o)
 
-        with create_output_stream(args, workdir_path, ws.title, "formula.csv") as o:
+        with create_output_stream(args, workdir_path, ws.title, x2c.SUFFIX_FORMULA) as o:
           write_csv(iter_cell_rows(ws), o)
 
     if args.cached:
       with rec_elapsed(timings, "emit_cached"):
         wb_cached = load_workbook(str(xlsx_path), data_only=True)
         for ws in wb_cached.worksheets:
-          with create_output_stream(args, workdir_path, ws.title, "cached.csv") as o:
+          with create_output_stream(args, workdir_path, ws.title, x2c.SUFFIX_CACHED) as o:
             write_csv(iter_cell_rows(ws), o)
 
 
