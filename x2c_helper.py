@@ -31,6 +31,9 @@ def value_suffix(backend):
   else:
     return f"value_{backend}.csv"
 
+def emit_value(backend):
+  return f"emit_value_{backend}"
+
 # -----------------------------------------------------------------
 # translator from None to ""
 
