@@ -157,6 +157,9 @@ def test_single_zip(args, zip_path, dic_counter):
                          dic_counter["cache_vs_libre"])
         # print(f"compare cache vs libre: {r} entries")
 
+def summarize_elapsed(dic, num_tops):
+  for zip_path in sorted(dic.keys(), key=lambda s: dic[s])[-num_tops:]:
+    print(f"elapsed {dic[zip_path]:.2f} in the inspection on {Path(zip_path).name}")
 
 def main():
   args = parse_args()
@@ -171,13 +174,19 @@ def main():
   else:
     total = len(args.zips)
 
+  path2elapsed = {}
   for i, zip_path in enumerate(args.zips, start=1):
     if i > total:
       break
     print(f"\r{i}/{total} ({100*i/total:5.1f}%) {zip_path}",
           end="", file=sys.stderr, flush=True,)
  
-    test_single_zip(args, zip_path, dic_counter)
+    with x2c.rec_elapsed(path2elapsed, zip_path):
+      test_single_zip(args, zip_path, dic_counter)
+
+  print("")
+
+  summarize_elapsed(path2elapsed, 10)
   summarize(dic_counter)
 
 if __name__ == "__main__":
