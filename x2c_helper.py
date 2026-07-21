@@ -1,6 +1,7 @@
 import sys
 import csv
 import shutil
+import time
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -110,3 +111,15 @@ def ensure_output_dir(dir, recreate=False):
 
 def touch_stage(dir, stage):
   Path(dir, stage).touch()
+
+# -----------------------------------------------------------------
+# record elapsed time in a dictionary
+
+@contextmanager
+def rec_elapsed(dic, key):
+  time_start = time.monotonic()
+  try:
+    yield
+  finally:
+    dic[key] = time.monotonic() - time_start
+
