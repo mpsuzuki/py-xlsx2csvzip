@@ -23,8 +23,8 @@ def parse_args():
   parser = argparse.ArgumentParser(
     description="compare csv file in zip archive"
   )
-  parser.add_argument("--debug", action="store_true", help="debug mode")
   parser.add_argument("zips", nargs="*", help="input xlsx file(s)")
+  parser.add_argument("--debug", action="store_true", help="debug mode")
   parser.add_argument("--dir", type=str, help="directory of ZIP files")
   args = parser.parse_args()
   
