@@ -25,6 +25,8 @@ def parse_args():
   )
   parser.add_argument("zips", nargs="*", help="input xlsx file(s)")
   parser.add_argument("--debug", action="store_true", help="debug mode")
+  parser.add_argument("--limit", type=int,
+                      help="limit the inspections to the first LIMIT files")
   parser.add_argument("--dir", type=str, help="directory of ZIP files")
   args = parser.parse_args()
   
@@ -163,9 +165,17 @@ def main():
     "excel_vs_libre": Counter(),
     "cache_vs_libre": Counter(),
   }
-  total = len(args.zips)
+
+  if args.limit:
+    total = args.limit
+  else:
+    total = len(args.zips)
+
   for i, zip_path in enumerate(args.zips, start=1):
-    print(f"\r{i}/{total} ({100*i/total:5.1f}%)", end="", file=sys.stderr, flush=True,)
+    if i > total:
+      break
+    print(f"\r{i}/{total} ({100*i/total:5.1f}%) {zip_path}",
+          end="", file=sys.stderr, flush=True,)
  
     test_single_zip(args, zip_path, dic_counter)
   summarize(dic_counter)
