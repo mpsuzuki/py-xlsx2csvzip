@@ -1,6 +1,7 @@
 import sys
 import csv
 import shutil
+import json
 import time
 from pathlib import Path
 from contextlib import contextmanager
@@ -123,3 +124,22 @@ def rec_elapsed(dic, key):
   finally:
     dic[key] = time.monotonic() - time_start
 
+
+# -----------------------------------------------------------------
+# load json if file exists
+
+def load_json(path_str):
+  json_path = Path(path_str)
+  if not json_path.exists():
+    return None
+  return json.loads(json_path.read_text(encoding="utf-8-sig"))
+
+
+# -----------------------------------------------------------------
+# write json
+
+def save_json(path_str, dic, ensure_ascii=False, sort_key=True):
+  Path(path_str).write_text(
+    json.dumps(dic, indent=2, ensure_ascii=ensure_ascii, sort_key=sort_key),
+    encoding="utf-8"
+  )
